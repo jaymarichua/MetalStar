@@ -1,9 +1,3 @@
-Below is a refactored version of your README.md (for the main branch). It maintains the same content, but is reorganized with headings and consistent style. After the refactored text, I’ll walk you through:
-	1.	How to commit these changes to the main branch.
-	2.	Sync everything again without messing up your superhuman branch.
-
-Refactored README for the Main Branch
-
 # MetalStar: High-Performance Metal Performance Shaders (MPS) for StarCraft II AI
 
 **License**  
