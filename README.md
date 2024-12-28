@@ -1,10 +1,8 @@
 # MetalStar: High-Performance Metal Performance Shaders (MPS) for StarCraft II AI
-
 **License**  
 This project is licensed under the Apache 2.0 License.  
 The original DI-star is (c) OpenDILab, inspired by DeepMind's AlphaStar.  
 All work in this fork is (c) 2024 Jaymari Chua.
-
 > **Note**  
 > “Applestar” or “MetalStar” refers to the same MPS-accelerated fork of DI-star. This fork adds Apple Metal (MPS) support for StarCraft II AI on macOS.
 ---
@@ -126,8 +124,10 @@ Instructions can be found in docs/agent.md. The design is modular so multiple ag
 Training (SL and RL)
 See docs/guidance_to_small_scale_training.md for small-scale training pipelines.
 Community
-Slack: link
-Discord: link
+### Chat group
+Slack: [link](https://join.slack.com/t/opendilab/shared_invite/zt-v9tmv4fp-nUBAQEH1_Kuyu_q4plBssQ)
+Discord server: [link](https://discord.gg/dkZS2JF56X)
+
 Recommended Citation
 ```latex
 @misc{distar,
@@ -145,5 +145,4 @@ Recommended Citation
     year={2024},
 }
 ```
-More Info
 This project is forked from opendilab/DI-star. MetalStar focuses on macOS Metal (MPS) acceleration. The original DI-star is released under the Apache 2.0 license.
