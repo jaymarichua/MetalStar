@@ -1,96 +1,10 @@
-# MetalStar: High-Performance Metal Performance Shaders MPS for StarCraft II AI
+# SuperStar: Superhuman Reinforcement Learning Agent for StarCraft II
+SuperStar adds configuration settings to modify the game AI affordances in StarCraft II matches against the human player; SuperStar is a fork of DI-star: A large-scale game AI distributed training platform specially developed for the StarCraft II. We've already trained grand-master AI！This project contains:
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
+SuperStar Changelog
+- [ ] Configure Actions Per Minute (APM) setting *(updated by 2024-12-29)*
 
-**AppleStar** is a fork of the [DI-star repository](https://github.com/opendilab/DI-star) by OpenDILab which is in turn inspired by DeepMind's AlphaStar. This fork adds support for Apple’s Metal Performance Shaders (MPS) on macOS.
-
-## Versions
-Python 3.10.0, torch 2.5.1, torchaudio 2.5.1
-
-### Command Line Usage Examples  
-
-Apple MPS (on Apple Silicon with MPS-capable PyTorch): Showing off different scenarios to use MPS (Metal) on Apple Silicon macOS; if MPS isn’t available, it falls back to CPU. And if you really want CPU only, you can pass --cpu.
-
-#### Human vs Agent (Default) with MPS  
-```bash
-python play.py
-```
-A “human_vs_agent” match using rl_model.pth (since model1 is "default"), with MPS as long as your system supports it. If MPS isn’t there, it prints a warning and runs on CPU.
-
-#### Human vs Agent with a Custom Model  
-Suppose you have a file my_rl_model.pth in the same folder as play.py:  
-```bash
-python play.py --model1 my_rl_model
-```  
-This instructs the script to look for my_rl_model.pth. You’re still in “human_vs_agent” mode by default, so the AI uses your custom model, and you can go head-to-head as the human.
-
-#### Agent vs Bot on MPS  
-```bash
-python play.py --game_type agent_vs_bot
-```  
-Here the AI model (model1) faces off against the built-in bot at difficulty bot10. If you want a lower-level bot, say bot7, do this:  
-```bash
-python play.py --model2 bot7 --game_type agent_vs_bot
-```  
-The script will interpret “bot7” as the bot difficulty rather than a model file on disk.  
-
-#### Agent vs Agent  
-Use two different models:  
-```bash
-python play.py --game_type agent_vs_agent --model1 rl_model --model2 sl_model
-```  
-Now you have a reinforcement-learning model against a supervised-learning model. Both will run on MPS (or CPU fallback) with no human players.  
-
-##### Forcing CPU Mode
-If you don’t want MPS for some reason (maybe you’re testing CPU performance), you can override:
-```bash
-python play.py --cpu
-```
-This forcibly uses the CPU, ignoring MPS even if it’s available.
-
-#### Another Human vs Agent Example
-Imagine you’ve trained some advanced RL named grandmaster_model.pth. You want to see if you can beat it:
-```bash
-python play.py --model1 grandmaster_model
-```
-It’ll attempt MPS first, default to “human_vs_agent,” and use grandmaster_model.pth for the AI side. Let the showdown begin!
-
-That’s it! These examples should help you jump right into your preferred StarCraft II matchups, whether it’s a human player, a built-in bot, or a pair of AI models. Enjoy battling it out under Apple Metal (MPS) acceleration!
-
-## macOS Installation
-
-macOS prerequisites 
-```
-brew install python
-brew install pip
-brew install micromamba
-micromamba create -n pytorch python=3.10
-micromamba activate pytorch
-micromamba install pytorch torchvision torchaudio -c pytorch -c conda-forge
-```
-
-DI-star prerequisites
-Inside the Applestar directory, issue the following commands:
-```
-pip install -e .
-```
-
-## macOS Troubleshooting VideoCard related errors
-
-On occasions that the game session did not terminate gracefully, there will be specific videocard related errors. In order to fix this, open battle.net and under Settings, choose the option to Restore In-Game Options.
-
-## Rolling Updates
-- [x] Added MPS support for model inference located at play.py *(updated on 2024-12-28)*
-- [x] Upgraded to use the latest version of pytorch that supports MPS through simple updates upon importing torch._six such as import as inf->math.inf and string_classes->str  *(updated on 2024-12-28)*
-- [x] Tested on Python 3.10.0, torch 2.5.1, torchaudio 2.5.1 *(updated on 2024-12-29)*
-- [x] StarCraft version remains to be on 4.10.0 to maintain the game version with the rl_model's training *(updated on 2024-12-29)*  
-- [ ] Add MPS support for MPS based distributed training
-
-## License and Attribution
-This project is licensed under the [Apache 2.0 License](./LICENSE). The original DI-star is (c) OpenDILab, and all work in this fork is (c) 2024 Jaymari Chua.
-
-# DI-Star Overview
-DI-star: A large-scale game AI distributed training platform specially developed for the StarCraft II. We've already trained grand-master AI！This project contains:
+DI-Star Changelog
 - [x] Play demo and test code (try and play with our agent!)
 - [x] First version of pre-trained SL and RL agent (only Zerg vs Zerg)
 - [x] Training code of Supervised Learning and Reinforcement Learning *(updated by 2022-01-31)*
@@ -270,7 +184,7 @@ Slack: [link](https://join.slack.com/t/opendilab/shared_invite/zt-v9tmv4fp-nUBAQ
 
 Discord server: [link](https://discord.gg/dkZS2JF56X)
 
-## Recommended Citation MetalStar and DI-star (upstream)
+## Citation and Attribution
 ```latex
 @misc{distar,
     title={DI-star: An Open-sourse Reinforcement Learning Framework for StarCraftII},
@@ -280,15 +194,15 @@ Discord server: [link](https://discord.gg/dkZS2JF56X)
     year={2021},
 }
 
-@misc{metalstar,
-    title={MetalStar: High-Performance Metal Performance Shaders MPS for StarCraft II AI},
-    author={Jaymari Chua},
-    publisher={GitHub},
-    howpublished={\url{https://github.com/jaymarichua/MetalStar}},
-    year={2024},
+@misc{superstar,
+    title={SuperStar: Superhuman Reinforcement Learning Agent for StarCraft II},
+    author={JaymariChua},
+    publisher = {GitHub},
+    howpublished = {\url{https://github.com/jaymarichua/SuperStar}},
+    year={2021},
 }
 ```
 
-## Information
-This project is forked from opendilab/DI-star, created by OpenDILab, and Applestar is focused on adding macOS Metal (MPS) acceleration. Applestar is based on DI-star, which is released under the Apache 2.0 license at the time of this fork.
+## License
+SuperStar is a fork of DI-star released under the Apache 2.0 license.
 
