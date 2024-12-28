@@ -143,5 +143,4 @@ Recommended Citation
     year={2024},
 }
 ```
-More Info
 This project is forked from opendilab/DI-star. MetalStar focuses on macOS Metal (MPS) acceleration. The original DI-star is released under the Apache 2.0 license.
