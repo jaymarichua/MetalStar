@@ -124,8 +124,10 @@ Instructions can be found in docs/agent.md. The design is modular so multiple ag
 Training (SL and RL)
 See docs/guidance_to_small_scale_training.md for small-scale training pipelines.
 Community
-Slack: link
-Discord: link
+### Chat group
+Slack: [link](https://join.slack.com/t/opendilab/shared_invite/zt-v9tmv4fp-nUBAQEH1_Kuyu_q4plBssQ)
+Discord server: [link](https://discord.gg/dkZS2JF56X)
+
 Recommended Citation
 ```latex
 @misc{distar,
