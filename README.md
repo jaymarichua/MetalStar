@@ -66,43 +66,33 @@ Clone or download the Applestar/MetalStar folder, then change directory into it:
 ```bash
 pip install -e .
 ```
-macOS Troubleshooting (VideoCard Errors)
+macOS Troubleshooting (VideoCard Errors)  
 Occasionally, if a game session doesn’t terminate gracefully, you might get video card–related errors. To fix this, open Battle.net settings and choose Restore In-Game Options.
-Rolling Updates
-	•	MPS support for model inference at play.py (updated on 2024-12-28)
-	•	Latest PyTorch that supports MPS (torch._six fix → import math.inf, etc.) (2024-12-28)
-	•	Tested on Python 3.10.0, torch 2.5.1, torchaudio 2.5.1 (updated on 2024-12-29)
-	•	StarCraft II version pinned at 4.10.0 for model compatibility (updated on 2024-12-29)
-	•	Plan to add MPS-based distributed training (WIP)
-License and Attribution
-	•	Apache 2.0 License
-	•	Original DI-star: (c) OpenDILab
-	•	MetalStar (this fork): (c) 2024 Jaymari Chua
-DI-Star Overview
-DI-star is a large-scale game AI distributed training platform for StarCraft II, originally by OpenDILab:
-	•	Demo and test code (play with our agent!)
-	•	Pre-trained SL and RL agent (Zerg vs Zerg)
-	•	Training code (Supervised and Reinforcement Learning), updated 2022-01-31
-	•	Training baseline on limited resources, plus guidance (2022-04-24)
-	•	Agents fought [Harstem on YouTube] (2022-04-01)
-	•	More robust pre-trained RL agents (WIP)
-Usage
-	•	Testing software on Windows
-	•	对战软件下载
-Please star the DI-star project to support the community’s growth.
-Installation Requirements
-	•	Python 3.6–3.8
-1. Install StarCraftII
-	•	Download retail SC2 from Blizzard’s official site.
-	•	For Linux, see Blizzard’s instructions.
-	•	Add SC2PATH to your environment if not installed in the default location. On macOS, typically /Applications/StarCraft II.
-2. Install distar
-git clone https://github.com/opendilab/DI-star.git
-cd DI-star
-pip install -e .
-3. Install PyTorch
-PyTorch official site for instructions.
-Note: a GPU is recommended for real-time agent tests, or MPS on Apple Silicon if you’re using MetalStar.
+Rolling Updates  
+	•	MPS support for model inference at play.py (updated on 2024-12-28)  
+	•	Latest PyTorch that supports MPS (torch._six fix → import math.inf, etc.) (2024-12-28)  
+	•	Tested on Python 3.10.0, torch 2.5.1, torchaudio 2.5.1 (updated on 2024-12-29)  
+	•	StarCraft II version pinned at 4.10.0 for model compatibility (updated on 2024-12-29)  
+	•	Plan to add MPS-based distributed training (WIP)  
+License and Attribution  
+	•	Apache 2.0 License  
+	•	Original DI-star: (c) OpenDILab  
+	•	MetalStar (this fork): (c) 2024 Jaymari Chua  
+  
+DI-Star Overview  
+  
+DI-star is a large-scale game AI distributed training platform for StarCraft II, originally by OpenDILab:  
+
+Please star the DI-star project to support the community’s growth.  
+
+Installation Requirements  
+	•	Python 3.6–3.8  
+
+Install StarCraftII  
+	•	Download retail SC2 from Blizzard’s official site.  
+	•	For Linux, see Blizzard’s instructions.  
+	•	Add SC2PATH to your environment if not installed in the default location. On macOS, typically /Applications/StarCraft II.  
+
 Play with Pre-Trained Agent
 1. Download SC2 version 4.10.0
 Double-click data/replays/replay_4.10.0.SC2Replay to auto-download SC2 4.10.0.
@@ -114,19 +104,21 @@ Double-click data/replays/replay_4.10.0.SC2Replay to auto-download SC2 4.10.0.
 3. Agent Test
 Play vs Agent
 `python -m distar.bin.play`
-	•	Default uses rl_model on GPU or CPU. If you want MPS (Metal), see the MetalStar instructions.
+	•	DI-star default uses rl_model on GPU or CPU, while MetalStar defaults to using MPS (Metal), see the MetalStar instructions.
 Agent vs Agent
 `python -m distar.bin.play --game_type agent_vs_agent`
 Agent vs Bot
 `python -m distar.bin.play --game_type agent_vs_bot`
-Building Your Own Agent
-Instructions can be found in docs/agent.md. The design is modular so multiple agents can share the same environment.
-Training (SL and RL)
-See docs/guidance_to_small_scale_training.md for small-scale training pipelines.
+  
+Building Your Own Agent  
+Instructions can be found  in docs/agent.md. The design is modular so multiple agents can share the same environment.  
+Training (SL and RL)  
+See docs/guidance_to_small_scale_training.md for small-scale training pipelines.  
+  
 Community
 ### Chat group
-Slack: [link](https://join.slack.com/t/opendilab/shared_invite/zt-v9tmv4fp-nUBAQEH1_Kuyu_q4plBssQ)
-Discord server: [link](https://discord.gg/dkZS2JF56X)
+Slack: OpenDILab - [https://join.slack.com/t/opendilab/shared_invite/zt-v9tmv4fp-nUBAQEH1_Kuyu_q4plBssQ](https://join.slack.com/t/opendilab/shared_invite/zt-v9tmv4fp-nUBAQEH1_Kuyu_q4plBssQ)  
+Discord: OpenDILab - [https://discord.gg/dkZS2JF56X](https://discord.gg/dkZS2JF56X)  
 
 Recommended Citation
 ```latex
@@ -137,6 +129,7 @@ Recommended Citation
     howpublished = {\url{https://github.com/opendilab/DI-star}},
     year={2021},
 }
+
 @misc{metalstar,
     title={MetalStar: High-Performance Metal Performance Shaders MPS for StarCraft II AI},
     author={Jaymari Chua},
