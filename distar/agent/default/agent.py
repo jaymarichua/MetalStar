@@ -161,7 +161,7 @@ class Agent:
             self.teacher_model = None
 
         self._use_dapo = learner_cfg.get('use_dapo', False)
-       if 'train' in self._job_type and self._use_dapo and self.HAS_SUCCESSIVE_MODEL:
+        if 'train' in self._job_type and self._use_dapo and self.HAS_SUCCESSIVE_MODEL:
             self.successive_model = Model(cfg)
             self._successive_hidden_state = [
                 (torch.zeros(self._hidden_size), torch.zeros(self._hidden_size))
