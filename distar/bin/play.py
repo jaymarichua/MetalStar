@@ -198,8 +198,10 @@ def main():
     actor = Actor(user_config)
     actor.run()
 
+    return actor
+
 if __name__ == "__main__":
-    main()
+    actor = main()
 
     # Parse logs to extract spam and toxic events
     spam_events, toxic_events = actor.parse_logs('path_to_log_file.log')
