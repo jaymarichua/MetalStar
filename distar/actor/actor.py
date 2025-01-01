@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# coding: utf-8
-# =============================================================================
 # actor.py
 #
-# This module merges the old actor flow with new features:
-#  - RollingRewardHackingMonitor
-#  - ToxicStrategyMonitor
-#  - partial reward ratio & APM limiting
-#  - parse_logs method restored so it doesn't crash in play.py
-# =============================================================================
+# Actor for a legacy pretrained model setup.
+# Includes:
+#  - APM limiting for "bot"/"model" players
+#  - RollingRewardHackingMonitor for spam detection
+#  - ToxicStrategyMonitor for cheese/worker harass
+#  - partial_reward_sum for final ratio (train mode)
+#
+# No changes to the model input shapes -> preserves old agent.py compatibility.
 
 import os
 import time
@@ -17,7 +17,6 @@ import uuid
 import random
 import json
 import platform
-import collections
 from collections import defaultdict, deque
 
 import torch
@@ -31,15 +30,15 @@ from distar.ctools.utils.dist_helper import dist_init
 from distar.envs.env import SC2Env
 from distar.ctools.worker.league.player import FRAC_ID
 
-# =============================================================================
-# Default config
-# =============================================================================
+# ------------------------------------------------------------------------------
+# Default config merged with user config
+# ------------------------------------------------------------------------------
 default_config = read_config(os.path.join(os.path.dirname(__file__), 'actor_default_config.yaml'))
-
 
 class RollingRewardHackingMonitor:
     """
-    Monitors short-term usage of specific actions, logs warnings if spammy.
+    Detects short-window action spam. Logs warnings when a certain threshold
+    is exceeded within a rolling time window. Does not modify agent input shape.
     """
     def __init__(self, loop_threshold=10, window_seconds=3.0, warn_interval=10):
         self.loop_threshold = loop_threshold
@@ -51,6 +50,7 @@ class RollingRewardHackingMonitor:
     def record_action(self, action_id):
         now = time.time()
         self.action_history[action_id].append(now)
+        # Remove times older than window_seconds
         while self.action_history[action_id] and (now - self.action_history[action_id][0]) > self.window_seconds:
             self.action_history[action_id].popleft()
 
@@ -58,24 +58,19 @@ class RollingRewardHackingMonitor:
         self.steps_since_warn += 1
         if self.steps_since_warn < self.warn_interval:
             return
-
-        suspicious_actions = []
-        for act_id, timestamps in self.action_history.items():
-            if len(timestamps) >= self.loop_threshold:
-                suspicious_actions.append((act_id, len(timestamps)))
-
-        if suspicious_actions and logger:
-            for act_id, count in suspicious_actions:
-                logger.info(
-                    f"[RollingRewardHackingMonitor] Potential spam: Action '{act_id}' repeated "
-                    f"{count} times in {self.window_seconds:.1f}s."
-                )
+        suspicious = []
+        for act_id, times in self.action_history.items():
+            if len(times) >= self.loop_threshold:
+                suspicious.append((act_id, len(times)))
+        if suspicious and logger:
+            for (act_id, count) in suspicious:
+                logger.info(f"[RollingRewardHackingMonitor] Potential spam: action={act_id} repeated {count}x in {self.window_seconds:.1f}s.")
         self.steps_since_warn = 0
-
 
 class ToxicStrategyMonitor:
     """
-    Tracks 'toxic' or hyper-aggressive strategies (e.g., worker harass, cheese expansions).
+    Monitors worker harass and early expansions for possible 'toxic' gameplay.
+    Remains outside the agent's forward pass, preserving shape.
     """
     def __init__(self, early_game_cutoff=300, max_worker_harass=5, cheese_threshold=2):
         self.early_game_cutoff = early_game_cutoff
@@ -89,34 +84,33 @@ class ToxicStrategyMonitor:
     def update_toxic_strategies(self, raw_ob, current_game_time, logger=None):
         self._check_worker_harass(raw_ob)
         self._check_early_cheese_expansions(raw_ob, current_game_time)
-
+        # If counts exceed threshold, we log a potential toxic strategy
         if (self.worker_harass_count > self.max_worker_harass
-                or self.early_expansion_or_proxy_count > self.cheese_threshold):
+            or self.early_expansion_or_proxy_count > self.cheese_threshold):
             self.toxic_strategic_events += 1
             if logger:
                 logger.info(
-                    f"[ToxicStrategyMonitor] Potential toxic strategy event: "
-                    f"harass={self.worker_harass_count}, cheese={self.early_expansion_or_proxy_count}"
+                    f"[ToxicStrategyMonitor] Potential toxic pattern: harass={self.worker_harass_count}, expansions={self.early_expansion_or_proxy_count}"
                 )
 
     def _check_worker_harass(self, raw_ob):
+        # Example worker unit types: SCV=45, Drone=104, Probe=84
         for u in raw_ob.observation.raw_data.units:
-            # Example worker IDs: SCV=45, Drone=104, Probe=84
             if u.alliance == 4 and u.unit_type in [45, 104, 84]:
-                if u.health < 10 and u.weapon_cooldown > 0:
+                if u.health < 20 and u.weapon_cooldown > 0:
                     self.worker_harass_count += 1
 
     def _check_early_cheese_expansions(self, raw_ob, current_game_time):
         if current_game_time <= self.early_game_cutoff:
-            expansions_built = 0
-            for unit in raw_ob.observation.raw_data.units:
-                # expansions: Hatch=86, Nexus=59, CC=18
-                if (unit.alliance == 1 and
-                        unit.unit_type in [86, 59, 18] and
-                        unit.build_progress < 1.0):
-                    expansions_built += 1
-            if expansions_built > 0:
-                self.early_expansion_or_proxy_count += expansions_built
+            expansions = 0
+            for u in raw_ob.observation.raw_data.units:
+                # For expansions: Hatch=86, Nexus=59, CommandCenter=18
+                if (u.alliance == 1 and u.unit_type in [86, 59, 18] and u.build_progress < 1.0):
+                    if unit.tag not in self.seen_expansion_tags:
+                        self.seen_expansion_tags.add(unit.tag)
+                        self.early_expansion_or_proxy_count += 1
+            if expansions > 0:
+                self.early_expansion_or_proxy_count += expansions
 
     def summarize_toxic_strategies(self):
         return {
@@ -125,62 +119,50 @@ class ToxicStrategyMonitor:
             "toxic_strategic_events": self.toxic_strategic_events
         }
 
-
 class Actor:
     """
-    Combined actor code that includes:
-     - RollingRewardHackingMonitor
-     - ToxicStrategyMonitor
-     - partial reward ratio
-     - multi-env processes
-     - parse_logs method to avoid missing method errors
+    Preserves old shape usage, adding APM limiting, spam detection, and toxic
+    strategy logs via separate code paths. This ensures pretrained agent or model
+    input shapes remain untouched.
     """
-
     def __init__(self, cfg):
         cfg = deep_merge_dicts(default_config, cfg)
         self._whole_cfg = cfg
         self._cfg = cfg.actor
         self._job_type = self._cfg.job_type
-        self._league_job_type = self._cfg.get('league_job_type', 'train')
+        self._league_job_type = self._cfg.get('league_job_type','train')
         self._actor_uid = str(uuid.uuid1())
         self._gpu_batch_inference = self._cfg.get('gpu_batch_inference', False)
 
-        # Logger
+        # Logging
         self._logger = TextLogger(
             path=os.path.join(
                 os.getcwd(),
+                'experiments',
                 self._whole_cfg.common.experiment_name,
                 'actor_log'
             ),
             name=self._actor_uid
         )
 
-        # Comm if train
+        # Actor comm for training
         if self._job_type == 'train':
             self._comm = ActorComm(self._whole_cfg, self._actor_uid, self._logger)
             interval = self._whole_cfg.communication.actor_ask_for_job_interval
             self.max_job_duration = interval * random.uniform(0.7, 1.3)
 
-        # APM tracking
+        # APM / spam / toxic side-channels
         self._bot_action_timestamps = {}
-
-        # Rolling spam check
         self._reward_hacking_monitor = RollingRewardHackingMonitor(
             loop_threshold=self._cfg.get('loop_threshold', 10),
             window_seconds=self._cfg.get('spam_window_seconds', 3.0),
             warn_interval=self._cfg.get('warn_interval', 10)
         )
+        self._toxic_strategy_monitor = ToxicStrategyMonitor()
 
-        # Toxic strategies
-        self._toxic_monitor = ToxicStrategyMonitor()
-
-        # Setup agents
         self._setup_agents()
 
     def _setup_agents(self):
-        """
-        If train -> ask comm, else load model states if needed.
-        """
         self.agents = []
         if self._job_type == 'train':
             self._comm.ask_for_job(self)
@@ -190,28 +172,30 @@ class Actor:
             for idx, player_id in enumerate(self._cfg.player_ids):
                 if 'bot' in player_id:
                     continue
+                # Import the agent code you want
                 AgentClass = import_module(self._cfg.agents.get(player_id, 'default'), 'Agent')
                 agent = AgentClass(self._whole_cfg)
                 agent.player_id = player_id
                 agent.side_id = idx
                 self.agents.append(agent)
 
+                # If this agent has a model, we load it from old config
                 if agent.HAS_MODEL:
                     if player_id not in self.models:
                         if self._cfg.use_cuda:
                             agent.model = agent.model.cuda()
                         else:
                             agent.model = agent.model.eval().share_memory()
-
                         if not self._cfg.fake_model:
-                            loaded_state = torch.load(self._cfg.model_paths[player_id], map_location='cpu')
-                            if 'map_name' in loaded_state:
-                                map_names.append(loaded_state['map_name'])
-                                agent._fake_reward_prob = loaded_state['fake_reward_prob']
-                                agent._z_path = loaded_state['z_path']
-                                agent.z_idx = loaded_state['z_idx']
+                            loaded_ckpt = torch.load(self._cfg.model_paths[player_id], map_location='cpu')
+                            if 'map_name' in loaded_ckpt:
+                                map_names.append(loaded_ckpt['map_name'])
+                                agent._fake_reward_prob = loaded_ckpt['fake_reward_prob']
+                                agent._z_path = loaded_ckpt['z_path']
+                                agent.z_idx = loaded_ckpt['z_idx']
                             net_state = {
-                                k: v for k, v in loaded_state['model'].items()
+                                k: v
+                                for k, v in loaded_ckpt['model'].items()
                                 if 'value_networks' not in k
                             }
                             agent.model.load_state_dict(net_state, strict=False)
@@ -219,25 +203,25 @@ class Actor:
                     else:
                         agent.model = self.models[player_id]
 
+            # If we discovered exactly one map_name in the model ckpt, set env
             if len(map_names) == 1:
                 self._whole_cfg.env.map_name = map_names[0]
             elif len(map_names) == 2:
+                # If not random => pick a specific map
                 if not (map_names[0] == 'random' and map_names[1] == 'random'):
                     self._whole_cfg.env.map_name = 'NewRepugnancy'
 
     def _inference_loop(self, env_id=0, job=None, result_queue=None, pipe_c=None):
-        """
-        Our main environment loop with partial ratio, toxic strategy, spam, APM, etc.
-        """
         if job is None:
             job = {}
         torch.set_num_threads(1)
 
+        # Possibly override environment races
         frac_ids = job.get('frac_ids', [])
         env_info = job.get('env_info', {})
         chosen_races = []
-        for frac_id in frac_ids:
-            chosen_races.append(random.choice(FRAC_ID[frac_id]))
+        for fid in frac_ids:
+            chosen_races.append(random.choice(FRAC_ID[fid]))
         if chosen_races:
             env_info['races'] = chosen_races
 
@@ -245,7 +229,6 @@ class Actor:
         self._env = SC2Env(merged_cfg)
 
         iter_count = 0
-        # For logging
         if env_id == 0:
             variable_record = VariableRecord(self._cfg.print_freq)
             variable_record.register_var('agent_time')
@@ -258,6 +241,7 @@ class Actor:
                 variable_record.register_var('send_data_per_agent')
                 variable_record.register_var('update_model_time')
 
+        # Set up APM-limiting
         bot_target_apm = self._cfg.get('bot_target_apm', 900)
         action_cooldown = 60.0 / bot_target_apm
         last_bot_action_time = {}
@@ -278,20 +262,21 @@ class Actor:
                     game_iters = 0
                     observations, game_info, map_name = self._env.reset()
 
-                    for idx in observations.keys():
-                        self.agents[idx].env_id = env_id
+                    # Initialize partial reward sums, agent resets
+                    for idx in observations:
+                        ag = self.agents[idx]
+                        ag.env_id = env_id
                         race_str = self._whole_cfg.env.races[idx]
-                        self.agents[idx].reset(map_name, race_str, game_info[idx], observations[idx])
-                        setattr(self.agents[idx], "partial_reward_sum", 0.0)
+                        ag.reset(map_name, race_str, game_info[idx], observations[idx])
+                        setattr(ag, "partial_reward_sum", 0.0)
 
-                        pid = self.agents[idx].player_id
-                        if 'bot' in pid or 'model' in pid:
+                        pid = ag.player_id
+                        if ('bot' in pid) or ('model' in pid):
                             last_bot_action_time[pid] = 0.0
                             self._bot_action_timestamps[pid] = deque()
 
                     while True:
-                        # Check for pipe commands (reset, close)
-                        if pipe_c is not None and pipe_c.poll():
+                        if pipe_c and pipe_c.poll():
                             cmd = pipe_c.recv()
                             if cmd == 'reset':
                                 break
@@ -304,105 +289,101 @@ class Actor:
                         actions = {}
                         players_obs = observations
 
-                        for player_index, obs_data in players_obs.items():
-                            agent = self.agents[player_index]
-                            pid = agent.player_id
-
+                        for player_idx, obs_data in players_obs.items():
+                            ag = self.agents[player_idx]
+                            pid = ag.player_id
                             if self._job_type == 'train':
-                                agent._model_last_iter = self._comm.model_last_iter_dict[pid].item()
+                                ag._model_last_iter = self._comm.model_last_iter_dict[pid].item()
 
-                            # APM limiting if 'bot' or 'model'
-                            if 'bot' in pid or 'model' in pid:
-                                now_time = time.time()
-                                if (now_time - last_bot_action_time[pid]) < action_cooldown:
-                                    actions[player_index] = NO_OP_ACTION
+                            # APM limit for bots/models
+                            if ('bot' in pid) or ('model' in pid):
+                                now_t = time.time()
+                                if (now_t - last_bot_action_time[pid]) < action_cooldown:
+                                    actions[player_idx] = NO_OP_ACTION
                                 else:
-                                    real_action = agent.step(obs_data)
-                                    actions[player_index] = real_action
-                                    last_bot_action_time[pid] = now_time
-                                    self._bot_action_timestamps[pid].append(now_time)
-                                    # remove old timestamps over 60s
-                                    while (self._bot_action_timestamps[pid] and
-                                           (now_time - self._bot_action_timestamps[pid][0]) > 60):
+                                    real_act = ag.step(obs_data)
+                                    actions[player_idx] = real_act
+                                    last_bot_action_time[pid] = now_t
+                                    self._bot_action_timestamps[pid].append(now_t)
+                                    while (self._bot_action_timestamps[pid]
+                                           and (now_t - self._bot_action_timestamps[pid][0]) > 60):
                                         self._bot_action_timestamps[pid].popleft()
                                     apm_now = len(self._bot_action_timestamps[pid])
-                                    self._logger.info(f"[APM] Player {pid}: {apm_now} (last 60s)")
-
-                                    # record spam
-                                    if isinstance(real_action, list):
-                                        for a_dict in real_action:
-                                            if 'func_id' in a_dict:
-                                                self._reward_hacking_monitor.record_action(a_dict['func_id'])
+                                    self._logger.info(f"[APM] Player {pid}: {apm_now} in last 60s")
+                                    # Record spam action
+                                    if isinstance(real_act, list):
+                                        for subact in real_act:
+                                            if 'func_id' in subact:
+                                                self._reward_hacking_monitor.record_action(subact['func_id'])
                             else:
-                                actions[player_index] = agent.step(obs_data)
+                                actions[player_idx] = ag.step(obs_data)
+
                             agent_count += 1
 
+                        # Time the agent step
                         agent_time = time.time() - agent_start
 
+                        # Environment step
                         env_start = time.time()
                         next_obs, reward, done = self._env.step(actions)
                         env_time = time.time() - env_start
 
-                        # spam detection
+                        # Spam detection
                         self._reward_hacking_monitor.detect_spam_loops(logger=self._logger)
 
-                        # toxic detection
-                        for p_idx, next_data in next_obs.items():
-                            gl_val = next_data['raw_obs'].observation.game_loop
-                            current_game_time = gl_val / 22.4
-                            self._toxic_monitor.update_toxic_strategies(next_data['raw_obs'], current_game_time, logger=self._logger)
+                        # Toxic detection
+                        for p_idx, nxt_data in next_obs.items():
+                            if 'raw_obs' in nxt_data:
+                                gl_val = nxt_data['raw_obs'].observation.game_loop
+                                current_time_s = gl_val / 22.4
+                                self._toxic_strategy_monitor.update_toxic_strategies(nxt_data['raw_obs'], current_time_s, logger=self._logger)
 
-                        # if train -> gather data
+                        # If training, gather data or send
                         if 'train' in self._job_type:
-                            post_process_time = 0
-                            post_process_count = 0
-                            send_data_time = 0
-                            send_data_count = 0
-
-                            for p_idx, next_data in next_obs.items():
+                            post_t = 0
+                            post_c = 0
+                            send_t = 0
+                            send_c = 0
+                            for p_idx, nxt_data in next_obs.items():
                                 store_data = (
                                     self._job_type == 'train_test'
-                                    or (self.agents[p_idx].player_id in self._comm.job['send_data_players'])
+                                    or self.agents[p_idx].player_id in self._comm.job['send_data_players']
                                 )
-                                # partial reward accumulation
                                 self.agents[p_idx].partial_reward_sum += reward[p_idx]
-
                                 if store_data:
                                     t0 = time.time()
-                                    traj_data = self.agents[p_idx].collect_data(
-                                        next_obs[p_idx], reward[p_idx], done, p_idx
-                                    )
-                                    post_process_time += (time.time() - t0)
-                                    post_process_count += 1
-
-                                    if traj_data is not None and self._job_type == 'train':
+                                    trajectory = self.agents[p_idx].collect_data(nxt_data, reward[p_idx], done, p_idx)
+                                    post_t += (time.time() - t0)
+                                    post_c += 1
+                                    if trajectory is not None and self._job_type == 'train':
                                         t1 = time.time()
-                                        self._comm.send_data(traj_data, self.agents[p_idx].player_id)
-                                        send_data_time += (time.time() - t1)
-                                        send_data_count += 1
+                                        self._comm.send_data(trajectory, self.agents[p_idx].player_id)
+                                        send_t += (time.time() - t1)
+                                        send_c += 1
                                 else:
-                                    self.agents[p_idx].update_fake_reward(next_obs[p_idx])
+                                    self.agents[p_idx].update_fake_reward(nxt_data)
 
                         iter_count += 1
                         game_iters += 1
 
                         if env_id == 0:
+                            # Logging performance
                             if 'train' in self._job_type:
-                                # update variable record
-                                variable_record.update_var({
+                                rec_obj = {
                                     'agent_time': agent_time,
                                     'agent_time_per_agent': agent_time / (agent_count + 1e-6),
-                                    'env_time': env_time,
-                                })
-                                if post_process_count > 0:
+                                    'env_time': env_time
+                                }
+                                variable_record.update_var(rec_obj)
+                                if post_c > 0:
                                     variable_record.update_var({
-                                        'post_process_time': post_process_time,
-                                        'post_process_per_agent': post_process_time / post_process_count
+                                        'post_process_time': post_t,
+                                        'post_process_per_agent': post_t / post_c
                                     })
-                                if send_data_count > 0:
+                                if send_c > 0:
                                     variable_record.update_var({
-                                        'send_data_time': send_data_time,
-                                        'send_data_per_agent': send_data_time / send_data_count
+                                        'send_data_time': send_t,
+                                        'send_data_per_agent': send_t / send_c
                                     })
                             else:
                                 variable_record.update_var({
@@ -416,43 +397,44 @@ class Actor:
                             observations = next_obs
                             continue
 
-                        # If done
+                        # If done => finalize training stats
                         if self._job_type == 'train':
+                            # pick random player's obs for final info
                             rand_pid = random.sample(observations.keys(), 1)[0]
-                            final_game_steps = observations[rand_pid]['raw_obs'].observation.game_loop
-                            result_info = defaultdict(dict)
-                            for idx2 in range(len(self.agents)):
-                                pid2 = self.agents[idx2].player_id
-                                side_id2 = self.agents[idx2].side_id
-                                race2 = self.agents[idx2].race
-                                agent_iters2 = self.agents[idx2].iter_count
-                                final_reward2 = reward[idx2]
+                            game_steps_done = observations[rand_pid]['raw_obs'].observation.game_loop
+                            results = defaultdict(dict)
+                            for a_idx in range(len(self.agents)):
+                                pid2 = self.agents[a_idx].player_id
+                                s2 = self.agents[a_idx].side_id
+                                r2 = self.agents[a_idx].race
+                                it2 = self.agents[a_idx].iter_count
+                                final_r = reward[a_idx]
+                                partial_s = getattr(self.agents[a_idx], "partial_reward_sum", 0.0)
+                                ratio_s = None
+                                if abs(final_r) > 1e-6:
+                                    ratio_s = partial_s / abs(final_r)
 
-                                partial_sum = getattr(self.agents[idx2], "partial_reward_sum", 0.0)
-                                ratio = None
-                                if abs(final_reward2) > 1e-6:
-                                    ratio = partial_sum / abs(final_reward2)
+                                results[s2]['race'] = r2
+                                results[s2]['player_id'] = pid2
+                                results[s2]['opponent_id'] = self.agents[a_idx].opponent_id
+                                results[s2]['winloss'] = final_r
+                                results[s2]['agent_iters'] = it2
+                                results[s2]['partial_reward_sum'] = partial_s
+                                if ratio_s is not None:
+                                    results[s2]['partial_reward_ratio'] = ratio_s
+                                results[s2].update(self.agents[a_idx].get_unit_num_info())
+                                results[s2].update(self.agents[a_idx].get_stat_data())
 
-                                result_info[side_id2]['race'] = race2
-                                result_info[side_id2]['player_id'] = pid2
-                                result_info[side_id2]['opponent_id'] = self.agents[idx2].opponent_id
-                                result_info[side_id2]['winloss'] = final_reward2
-                                result_info[side_id2]['agent_iters'] = agent_iters2
-                                result_info[side_id2]['partial_reward_sum'] = partial_sum
-                                if ratio is not None:
-                                    result_info[side_id2]['partial_reward_ratio'] = ratio
-                                result_info[side_id2].update(self.agents[idx2].get_unit_num_info())
-                                result_info[side_id2].update(self.agents[idx2].get_stat_data())
+                            duration_s = time.time() - game_start
+                            results['game_steps'] = game_steps_done
+                            results['game_iters'] = game_iters
+                            results['game_duration'] = duration_s
+                            # Add toxic summary
+                            tox_sum = self._toxic_strategy_monitor.summarize_toxic_strategies()
+                            results.update(tox_sum)
 
-                            game_duration = time.time() - game_start
-                            result_info['game_steps'] = final_game_steps
-                            result_info['game_iters'] = game_iters
-                            result_info['game_duration'] = game_duration
-                            # toxic summary
-                            toxic_summary = self._toxic_monitor.summarize_toxic_strategies()
-                            result_info.update(toxic_summary)
-
-                            self._comm.send_result(result_info)
+                            # Send final results
+                            self._comm.send_result(results)
 
                         break
 
@@ -465,52 +447,22 @@ class Actor:
                     self._env.close()
 
             self._env.close()
-            if result_queue is not None:
+            if result_queue:
                 print(os.getpid(), 'done')
                 result_queue.put('done')
-                # block to keep process alive if needed
-                time.sleep(1)
+                # Keep process alive if needed
+                time.sleep(9999999)
             else:
                 return
 
-    def parse_logs(self, log_file):
-        """
-        RESTORED: parse_logs method, so we don't crash if play.py calls it.
-        You can customize or remove if you don't need it.
-        """
-        if not os.path.exists(log_file):
-            print(f"[parse_logs] No such file: {log_file}. Returning empty lists.")
-            return [], []
-        with open(log_file, 'r') as f:
-            lines = f.readlines()
-
-        spam_events = [ln for ln in lines if 'RollingRewardHackingMonitor' in ln]
-        toxic_events = [ln for ln in lines if 'ToxicStrategyMonitor' in ln]
-        return spam_events, toxic_events
-
-    def summarize_results(self, result_file):
-        """
-        If your code or play.py calls it, implement logic here. Otherwise, safe to remove.
-        """
-        if not os.path.exists(result_file):
-            print(f"[summarize_results] No such file: {result_file}")
-            return
-        with open(result_file, 'r') as f:
-            data = json.load(f)
-        print("Partial Reward Ratios:", data.get('partial_reward_ratio', 'N/A'))
-        print("Toxic Strategy Summary:", data.get('toxic_strategy_summary', 'N/A'))
-
     def _gpu_inference_loop(self):
-        """
-        For GPU-batch usage, adapted from old code.
-        """
+        # If you rely on GPU batch mode
         _, _ = dist_init(method='single_node')
         torch.set_num_threads(1)
-
-        for agent in self.agents:
-            agent.model = agent.model.cuda()
+        for ag in self.agents:
+            ag.model = ag.model.cuda()
             if 'train' in self._job_type:
-                agent.teacher_model = agent.teacher_model.cuda()
+                ag.teacher_model = ag.teacher_model.cuda()
 
         start_time = time.time()
         done_count = 0
@@ -534,30 +486,23 @@ class Actor:
                             self._close_processes()
                             break
 
-                for agent in self.agents:
-                    agent.gpu_batch_inference()
+                # GPU-batch inference call for each agent
+                for ag in self.agents:
+                    ag.gpu_batch_inference()
                     if 'train' in self._job_type:
-                        agent.gpu_batch_inference(teacher=True)
+                        ag.gpu_batch_inference(teacher=True)
 
     def _start_multi_inference_loop(self):
-        """
-        Multi-env spawning.
-        """
         self._close_processes()
         self._processes = []
-        if hasattr(self, '_comm'):
-            job = self._comm.job
-        else:
-            job = {}
-
+        job = self._comm.job if hasattr(self, '_comm') else {}
         self.pipes = []
-        context_str = 'spawn' if platform.system().lower() == 'windows' else 'fork'
-        mp_context = mp.get_context(context_str)
-        self._result_queue = mp_context.Queue()
-
+        ctx_str = 'spawn' if platform.system().lower() == 'windows' else 'fork'
+        mp_ctx = mp.get_context(ctx_str)
+        self._result_queue = mp_ctx.Queue()
         for env_id in range(self._cfg.env_num):
-            pipe_p, pipe_c = mp_context.Pipe()
-            p = mp_context.Process(
+            pipe_p, pipe_c = mp_ctx.Pipe()
+            p = mp_ctx.Process(
                 target=self._inference_loop,
                 args=(env_id, job, self._result_queue, pipe_c),
                 daemon=True
@@ -573,6 +518,7 @@ class Actor:
     def run(self):
         try:
             if 'test' in self._job_type:
+                # single environment test
                 self._inference_loop()
             else:
                 if self._job_type == 'train':
@@ -580,19 +526,17 @@ class Actor:
                     if self._gpu_batch_inference:
                         self._gpu_inference_loop()
                     else:
-                        start_time = time.time()
+                        st = time.time()
                         while True:
-                            if time.time() - start_time > self.max_job_duration:
+                            if time.time() - st > self.max_job_duration:
                                 self.reset()
                             self._comm.update_model(self)
                             time.sleep(1)
-
                 if self._job_type == 'eval':
                     self._start_multi_inference_loop()
                     if self._gpu_batch_inference:
                         self._gpu_inference_loop()
                     else:
-                        # Wait for all processes to finish
                         for _ in range(len(self._processes)):
                             self._result_queue.get()
                         self._close_processes()
@@ -619,14 +563,14 @@ class Actor:
 
     def _close_processes(self):
         if hasattr(self, '_processes'):
-            for p in self.pipes:
-                p.send('close')
-            for p in self._processes:
-                p.join()
+            for pipe_p in self.pipes:
+                pipe_p.send('close')
+            for proc in self._processes:
+                proc.join()
 
     def iter_after_hook(self, iter_count, variable_record):
         if iter_count % self._cfg.print_freq == 0:
-            if hasattr(self, '_comm'):
+            if hasattr(self,'_comm'):
                 variable_record.update_var({
                     'update_model_time': self._comm._avg_update_model_time.item()
                 })
@@ -639,6 +583,24 @@ class Actor:
                     variable_record.get_vars_text()
                 )
             )
+
+    # Optionally, minimal parse_logs if your code outside calls it
+    def parse_logs(self, log_file):
+        if not os.path.exists(log_file):
+            return [], []
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+        spam_logs = [ln for ln in lines if 'RollingRewardHackingMonitor' in ln]
+        toxic_logs = [ln for ln in lines if 'ToxicStrategyMonitor' in ln]
+        return spam_logs, toxic_logs
+
+    def summarize_results(self, result_file):
+        if not os.path.isfile(result_file):
+            self._logger.info(f"No such result file: {result_file}")
+            return
+        with open(result_file, 'r') as f:
+            data = json.load(f)
+        self._logger.info(f"Results => {list(data.keys())}")
 
 
 if __name__ == '__main__':
